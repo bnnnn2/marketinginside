@@ -52,9 +52,8 @@ export async function onRequestPost(context: any): Promise<Response> {
       status: 200,
       headers: corsHeaders,
     });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return new Response(JSON.stringify({ error: "요청 처리 중 오류가 발생했습니다.", debug: msg }), {
+  } catch {
+    return new Response(JSON.stringify({ error: "요청 처리 중 오류가 발생했습니다." }), {
       status: 500,
       headers: corsHeaders,
     });
