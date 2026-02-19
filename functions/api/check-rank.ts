@@ -1,5 +1,5 @@
 // Cloudflare Pages Function: POST /api/check-rank
-// 네이버 플레이스 순위 조회 후 Supabase에 저장
+// 네이버 플레이스 순위 + 부가 데이터 조회 후 Supabase에 저장
 // 모바일 기준, 광고 제외
 
 import { verifyToken } from "../_shared/verify-token";
@@ -19,6 +19,15 @@ function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: CORS_HEADERS });
 }
 
+function parseNum(val: unknown): number | null {
+  if (val == null) return null;
+  const n =
+    typeof val === "number"
+      ? val
+      : parseInt(String(val).replace(/,/g, ""), 10);
+  return isNaN(n) ? null : n;
+}
+
 const GRAPHQL_ENDPOINT = "https://pcmap-api.place.naver.com/place/graphql";
 const DISPLAY = 15;
 
@@ -29,6 +38,8 @@ query getRestaurants($restaurantListInput: RestaurantListInput) {
       id
       name
       dbType
+      visitorReviewCount
+      blogCafeReviewCount
     }
     total
   }
@@ -38,6 +49,8 @@ interface NaverItem {
   id: string;
   name: string;
   dbType: string;
+  visitorReviewCount?: unknown;
+  blogCafeReviewCount?: unknown;
 }
 
 interface NaverGQLResponse {
@@ -50,19 +63,14 @@ interface NaverGQLResponse {
   errors?: Array<{ message: string }>;
 }
 
-// 네이버 플레이스 GraphQL API 호출 (모바일 기준)
 async function searchNaverPage(
   keyword: string,
   start: number
-): Promise<NaverItem[]> {
+): Promise<{ items: NaverItem[]; total: number }> {
   const payload = {
     operationName: "getRestaurants",
     variables: {
-      restaurantListInput: {
-        query: keyword,
-        start,
-        display: DISPLAY,
-      },
+      restaurantListInput: { query: keyword, start, display: DISPLAY },
     },
     query: GQL_QUERY,
   };
@@ -81,42 +89,71 @@ async function searchNaverPage(
     body: JSON.stringify(payload),
   });
 
-  if (!resp.ok) return [];
+  if (!resp.ok) return { items: [], total: 0 };
 
   const data = (await resp.json()) as NaverGQLResponse;
-  if (data.errors?.length) return [];
+  if (data.errors?.length) return { items: [], total: 0 };
 
   // 광고(dbType !== 'drt') 제외
-  return (data.data?.restaurantList?.items ?? []).filter(
+  const items = (data.data?.restaurantList?.items ?? []).filter(
     (item) => item.dbType === "drt"
   );
+  const total = data.data?.restaurantList?.total ?? 0;
+  return { items, total };
 }
 
-// 특정 placeId의 순위 탐색 (최대 maxPages 페이지, 총 300위)
-async function findRank(
+interface CheckResult {
+  keyword: string;
+  rank: number | null;
+  blog_count: number | null;
+  visitor_review_count: number | null;
+  monthly_review_count: number | null;
+  business_count: number | null;
+}
+
+async function findRankAndData(
   keyword: string,
   placeId: string,
   maxPages = 20
-): Promise<number | null> {
-  let rank = 0;
+): Promise<CheckResult> {
+  let rank: number | null = null;
+  let visitorReviewCount: number | null = null;
+  let blogCount: number | null = null;
+  let businessCount: number | null = null;
+  let position = 0;
 
   for (let page = 1; page <= maxPages; page++) {
     const start = (page - 1) * DISPLAY + 1;
-    const results = await searchNaverPage(keyword, start);
+    const { items, total } = await searchNaverPage(keyword, start);
 
-    if (results.length === 0) break;
+    if (page === 1) {
+      businessCount = total;
+    }
 
-    for (const item of results) {
-      rank++;
+    if (items.length === 0) break;
+
+    for (const item of items) {
+      position++;
       if (item.id === placeId) {
-        return rank;
+        rank = position;
+        visitorReviewCount = parseNum(item.visitorReviewCount);
+        blogCount = parseNum(item.blogCafeReviewCount);
+        break;
       }
     }
 
-    if (results.length < DISPLAY) break;
+    if (rank !== null) break;
+    if (items.length < DISPLAY) break;
   }
 
-  return null; // 300위 밖
+  return {
+    keyword,
+    rank,
+    blog_count: blogCount,
+    visitor_review_count: visitorReviewCount,
+    monthly_review_count: null, // TODO: 네이버 플레이스 상세 API 조사 후 구현
+    business_count: businessCount,
+  };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -141,12 +178,12 @@ export async function onRequestPost(context: any): Promise<Response> {
     );
   }
 
-  const results: { keyword: string; rank: number | null }[] = [];
+  const results: CheckResult[] = [];
   const checkedAt = new Date().toISOString();
 
   for (const keyword of body.keywords) {
-    const rank = await findRank(keyword, body.naver_place_id);
-    results.push({ keyword, rank });
+    const result = await findRankAndData(keyword, body.naver_place_id);
+    results.push(result);
   }
 
   const rows = results.map((r) => ({
@@ -154,6 +191,10 @@ export async function onRequestPost(context: any): Promise<Response> {
     keyword: r.keyword,
     rank: r.rank,
     checked_at: checkedAt,
+    blog_count: r.blog_count,
+    visitor_review_count: r.visitor_review_count,
+    monthly_review_count: r.monthly_review_count,
+    business_count: r.business_count,
   }));
 
   const insertResp = await fetch(`${env.SUPABASE_URL}/rest/v1/rankings`, {

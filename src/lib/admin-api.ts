@@ -50,6 +50,22 @@ export async function addPlace(
   return resp.json();
 }
 
+export async function updatePlaceKeywords(
+  id: string,
+  keywords: string[]
+): Promise<Place> {
+  const resp = await fetch(`/api/places?id=${id}`, {
+    method: "PATCH",
+    headers: authHeaders(),
+    body: JSON.stringify({ keywords }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json();
+    throw new Error(err.error ?? "키워드 업데이트 실패");
+  }
+  return resp.json();
+}
+
 export async function deletePlace(id: string): Promise<void> {
   const resp = await fetch(`/api/places?id=${id}`, {
     method: "DELETE",
@@ -60,7 +76,7 @@ export async function deletePlace(id: string): Promise<void> {
 
 export async function fetchRankings(
   place_id: string,
-  limit = 100
+  limit = 500
 ): Promise<Ranking[]> {
   const resp = await fetch(
     `/api/rankings?place_id=${place_id}&limit=${limit}`,

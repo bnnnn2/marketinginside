@@ -12,12 +12,25 @@ export interface Ranking {
   keyword: string;
   rank: number | null;
   checked_at: string;
+  blog_count: number | null;
+  visitor_review_count: number | null;
+  monthly_review_count: number | null;
+  business_count: number | null;
 }
 
-// 키워드별 최신 순위 (대시보드 표시용)
-export interface LatestRanking {
-  keyword: string;
+// 날짜별 데이터 (대시보드 테이블용)
+export interface DayData {
   rank: number | null;
-  checked_at: string;
-  prevRank: number | null; // 직전 순위 (변동 계산용)
+  prevRank: number | null; // 전날 순위 (변동 계산용)
+  blog_count: number | null;
+  visitor_review_count: number | null;
+  monthly_review_count: number | null;
+  business_count: number | null;
+}
+
+// 키워드별 날짜 테이블 데이터
+export interface KeywordTableData {
+  keyword: string;
+  dates: string[]; // "MM-DD(요일)" 형식, 최신순
+  dataByDate: Record<string, DayData>; // key: "YYYY-MM-DD"
 }

@@ -130,13 +130,54 @@ export async function onRequestDelete(context: any): Promise<Response> {
   return json({ success: true });
 }
 
+// PATCH /api/places?id=UUID — 키워드 배열 업데이트
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function onRequestPatch(context: any): Promise<Response> {
+  if (!(await authenticate(context))) {
+    return json({ error: "인증이 필요합니다." }, 401);
+  }
+
+  const env = context.env as Env;
+  const url = new URL(context.request.url);
+  const id = url.searchParams.get("id");
+
+  if (!id) {
+    return json({ error: "id 파라미터가 필요합니다." }, 400);
+  }
+
+  const body = (await context.request.json()) as { keywords: string[] };
+
+  if (!Array.isArray(body.keywords)) {
+    return json({ error: "keywords 배열이 필요합니다." }, 400);
+  }
+
+  const resp = await fetch(`${env.SUPABASE_URL}/rest/v1/places?id=eq.${id}`, {
+    method: "PATCH",
+    headers: {
+      apikey: env.SUPABASE_SERVICE_KEY,
+      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify({ keywords: body.keywords }),
+  });
+
+  if (!resp.ok) {
+    const err = await resp.text();
+    return json({ error: "키워드 업데이트 실패", detail: err }, 500);
+  }
+
+  const updated = await resp.json();
+  return json(Array.isArray(updated) ? updated[0] : updated);
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export async function onRequestOptions(_context: any): Promise<Response> {
   return new Response(null, {
     status: 204,
     headers: {
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+      "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type, X-Admin-Token",
     },
   });

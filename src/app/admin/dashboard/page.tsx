@@ -2,66 +2,233 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import type { Place, Ranking, LatestRanking } from "@/lib/types";
+import type { Place, Ranking, KeywordTableData, DayData } from "@/lib/types";
 import {
   fetchPlaces,
   addPlace,
+  updatePlaceKeywords,
   deletePlace,
   fetchRankings,
   checkRank,
 } from "@/lib/admin-api";
 
-// 키워드별 최신 2개 순위 추출 → 변동 계산
-function computeLatestRankings(rankings: Ranking[]): LatestRanking[] {
-  const byKeyword: Record<string, Ranking[]> = {};
-  for (const r of rankings) {
-    if (!byKeyword[r.keyword]) byKeyword[r.keyword] = [];
-    byKeyword[r.keyword].push(r);
-  }
+const DAY_KO = ["일", "월", "화", "수", "목", "금", "토"];
 
-  return Object.entries(byKeyword).map(([keyword, rows]) => {
-    const sorted = rows.sort(
-      (a, b) => new Date(b.checked_at).getTime() - new Date(a.checked_at).getTime()
-    );
-    return {
-      keyword,
-      rank: sorted[0]?.rank ?? null,
-      checked_at: sorted[0]?.checked_at ?? "",
-      prevRank: sorted[1]?.rank ?? null,
-    };
+function formatDateLabel(isoDate: string): string {
+  const d = new Date(isoDate + "T00:00:00");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  const day = DAY_KO[d.getDay()];
+  return `${mm}-${dd}(${day})`;
+}
+
+function toDateKey(iso: string): string {
+  return iso.slice(0, 10); // "YYYY-MM-DD"
+}
+
+function fmt(n: number | null, unit = ""): string {
+  if (n == null) return "-";
+  return n.toLocaleString() + unit;
+}
+
+// rankings 배열 → 키워드별 날짜 테이블 데이터 변환
+function buildKeywordTables(
+  rankings: Ranking[],
+  keywords: string[],
+  maxDates = 14
+): KeywordTableData[] {
+  return keywords.map((kw) => {
+    const kwRows = rankings
+      .filter((r) => r.keyword === kw)
+      .sort(
+        (a, b) =>
+          new Date(b.checked_at).getTime() - new Date(a.checked_at).getTime()
+      );
+
+    // 날짜별 최신 1건만 (같은 날 여러 번 체크 시 최신 것 사용)
+    const byDate: Record<string, Ranking> = {};
+    for (const r of kwRows) {
+      const dk = toDateKey(r.checked_at);
+      if (!byDate[dk]) byDate[dk] = r;
+    }
+
+    // 최신순 날짜 배열 (최대 maxDates)
+    const sortedDates = Object.keys(byDate)
+      .sort((a, b) => b.localeCompare(a))
+      .slice(0, maxDates);
+
+    const dataByDate: Record<string, DayData> = {};
+    for (let i = 0; i < sortedDates.length; i++) {
+      const dk = sortedDates[i];
+      const curr = byDate[dk];
+      const prevDk = sortedDates[i + 1]; // 하루 전 (배열상 다음)
+      const prevRank = prevDk ? (byDate[prevDk]?.rank ?? null) : null;
+      dataByDate[dk] = {
+        rank: curr.rank,
+        prevRank,
+        blog_count: curr.blog_count,
+        visitor_review_count: curr.visitor_review_count,
+        monthly_review_count: curr.monthly_review_count,
+        business_count: curr.business_count,
+      };
+    }
+
+    return { keyword: kw, dates: sortedDates, dataByDate };
   });
 }
 
-function RankBadge({ rank }: { rank: number | null }) {
-  if (rank === null)
-    return <span className="text-gray-400 text-xs">300위 밖</span>;
-  if (rank <= 3) return <span className="font-bold text-amber-600">{rank}위</span>;
-  if (rank <= 10) return <span className="font-semibold text-blue-600">{rank}위</span>;
-  return <span className="text-gray-700">{rank}위</span>;
-}
-
+// 변동폭 표시
 function RankChange({ curr, prev }: { curr: number | null; prev: number | null }) {
-  if (curr === null || prev === null) return null;
-  const diff = prev - curr; // 양수 = 상승
+  if (curr === null) return null;
+  if (prev === null) return <span className="text-gray-400 text-xs">-</span>;
+  const diff = prev - curr; // 양수 = 순위 상승
   if (diff === 0) return <span className="text-gray-400 text-xs">→</span>;
   if (diff > 0)
-    return (
-      <span className="text-emerald-600 text-xs font-medium">↑{diff}</span>
-    );
-  return (
-    <span className="text-red-500 text-xs font-medium">↓{Math.abs(diff)}</span>
-  );
+    return <span className="text-emerald-600 text-xs font-semibold">▲{diff}</span>;
+  return <span className="text-red-500 text-xs font-semibold">▼{Math.abs(diff)}</span>;
 }
 
-function formatDate(iso: string) {
-  if (!iso) return "-";
-  const d = new Date(iso);
-  return d.toLocaleString("ko-KR", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+// 순위 셀 (굵게, 큰 글씨)
+function RankDisplay({ rank }: { rank: number | null }) {
+  if (rank === null)
+    return <span className="text-gray-400 text-sm font-medium">300위 밖</span>;
+  if (rank <= 3)
+    return <span className="text-amber-600 text-xl font-bold">{rank}위</span>;
+  if (rank <= 10)
+    return <span className="text-blue-600 text-xl font-bold">{rank}위</span>;
+  return <span className="text-gray-800 text-xl font-bold">{rank}위</span>;
+}
+
+// 키워드 테이블 1개
+function KeywordTable({
+  table,
+  place,
+  onRemoveKeyword,
+}: {
+  table: KeywordTableData;
+  place: Place;
+  onRemoveKeyword: (kw: string) => void;
+}) {
+  const naverUrl = `https://m.place.naver.com/restaurant/${place.naver_place_id}`;
+
+  return (
+    <div className="mb-6 border border-gray-200 rounded-xl overflow-hidden shadow-sm">
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs border-collapse min-w-max">
+          {/* 헤더 1행: 키워드명 | 네이버URL + 매장명 */}
+          <thead>
+            <tr className="bg-gray-800 text-white">
+              <td
+                colSpan={table.dates.length + 1}
+                className="px-4 py-2.5"
+              >
+                <div className="flex items-center justify-between gap-4">
+                  <span className="font-bold text-sm">
+                    🔍 {table.keyword}
+                  </span>
+                  <a
+                    href={naverUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-300 hover:text-blue-200 underline truncate max-w-xs"
+                  >
+                    naver.com ↗ {place.name}
+                  </a>
+                </div>
+              </td>
+            </tr>
+            {/* 헤더 2행: 날짜 컬럼 */}
+            <tr className="bg-gray-100 text-gray-600">
+              <th className="px-3 py-2 text-left font-medium w-16 border-r border-gray-200">
+                날짜
+              </th>
+              {table.dates.length === 0 ? (
+                <th className="px-3 py-2 text-center text-gray-400 italic">
+                  순위 데이터 없음
+                </th>
+              ) : (
+                table.dates.map((dk) => (
+                  <th
+                    key={dk}
+                    className="px-3 py-2 text-center font-medium min-w-[100px] border-l border-gray-200"
+                  >
+                    {formatDateLabel(dk)}
+                  </th>
+                ))
+              )}
+            </tr>
+          </thead>
+
+          {/* 본문: 단일 데이터 행 */}
+          <tbody>
+            {table.dates.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={2}
+                  className="px-4 py-6 text-center text-gray-400"
+                >
+                  순위 체크를 실행하면 데이터가 표시됩니다.
+                </td>
+              </tr>
+            ) : (
+              <tr className="bg-white hover:bg-gray-50 transition-colors">
+                <td className="px-3 py-3 border-r border-gray-100 text-gray-500 font-medium text-center">
+                  데이터
+                </td>
+                {table.dates.map((dk) => {
+                  const d: DayData = table.dataByDate[dk];
+                  return (
+                    <td
+                      key={dk}
+                      className="px-3 py-3 border-l border-gray-100 text-center align-top"
+                    >
+                      {/* 순위 */}
+                      <div className="mb-1">
+                        <RankDisplay rank={d.rank} />
+                      </div>
+                      {/* 변동폭 */}
+                      <div className="mb-2">
+                        <RankChange curr={d.rank} prev={d.prevRank} />
+                      </div>
+                      {/* 부가 데이터 */}
+                      <div className="space-y-0.5 text-gray-600 text-xs">
+                        <div>
+                          <span className="text-blue-600 font-medium">블</span>{" "}
+                          {fmt(d.blog_count, "개")}
+                        </div>
+                        <div>
+                          <span className="text-emerald-600 font-medium">방</span>{" "}
+                          {fmt(d.visitor_review_count, "개")}
+                        </div>
+                        <div>
+                          <span className="text-purple-600 font-medium">월</span>{" "}
+                          {fmt(d.monthly_review_count, "건")}
+                        </div>
+                        <div>
+                          <span className="text-orange-600 font-medium">업</span>{" "}
+                          {fmt(d.business_count, "개")}
+                        </div>
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* 키워드 삭제 버튼 */}
+      <div className="flex justify-end px-4 py-2 bg-gray-50 border-t border-gray-200">
+        <button
+          onClick={() => onRemoveKeyword(table.keyword)}
+          className="text-xs text-red-500 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded transition-colors"
+        >
+          ✕ &quot;{table.keyword}&quot; 키워드 삭제
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // 매장 추가 모달
@@ -115,7 +282,7 @@ function AddPlaceModal({
               value={name}
               onChange={(e) => setName(e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="예: 카페 강남점"
+              placeholder="예: 함박마을함박스테이크앤파스타"
             />
           </div>
           <div>
@@ -127,10 +294,10 @@ function AddPlaceModal({
               value={placeId}
               onChange={(e) => setPlaceId(e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="예: 1234567890"
+              placeholder="예: 2061557201"
             />
             <p className="text-xs text-gray-500 mt-1">
-              네이버 지도에서 매장 클릭 → URL의 숫자 ID
+              네이버 플레이스 URL의 숫자 ID (예: m.place.naver.com/restaurant/<b>2061557201</b>)
             </p>
           </div>
           <div>
@@ -142,7 +309,7 @@ function AddPlaceModal({
               value={keywordsInput}
               onChange={(e) => setKeywordsInput(e.target.value)}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="예: 강남카페, 신논현역카페"
+              placeholder="예: 동래맛집, 동래밥집"
             />
           </div>
           {error && (
@@ -172,41 +339,45 @@ function AddPlaceModal({
   );
 }
 
-// 우측 상세 패널
-function PlaceDetail({
+// 우측 메인 패널
+function PlaceMain({
   place,
+  onPlaceUpdated,
   onDeleted,
 }: {
   place: Place;
+  onPlaceUpdated: (updated: Place) => void;
   onDeleted: () => void;
 }) {
   const [rankings, setRankings] = useState<Ranking[]>([]);
   const [checking, setChecking] = useState(false);
-  const [checkResult, setCheckResult] = useState<string>("");
+  const [checkMsg, setCheckMsg] = useState("");
+  const [loadingData, setLoadingData] = useState(false);
+  const [newKeyword, setNewKeyword] = useState("");
+  const [keywordLoading, setKeywordLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [loadingHistory, setLoadingHistory] = useState(false);
 
   const loadRankings = useCallback(async () => {
-    setLoadingHistory(true);
+    setLoadingData(true);
     try {
       const data = await fetchRankings(place.id);
       setRankings(data);
     } catch {
       // 조회 실패 시 빈 배열 유지
     } finally {
-      setLoadingHistory(false);
+      setLoadingData(false);
     }
   }, [place.id]);
 
   useEffect(() => {
     setRankings([]);
-    setCheckResult("");
+    setCheckMsg("");
     loadRankings();
   }, [place.id, loadRankings]);
 
   async function handleCheckRank() {
     setChecking(true);
-    setCheckResult("");
+    setCheckMsg("");
     try {
       const result = await checkRank(
         place.id,
@@ -214,24 +385,57 @@ function PlaceDetail({
         place.keywords
       );
       const summary = result.results
-        .map(
-          (r) =>
-            `${r.keyword}: ${r.rank !== null ? r.rank + "위" : "300위 밖"}`
-        )
+        .map((r) => `${r.keyword}: ${r.rank !== null ? r.rank + "위" : "300위 밖"}`)
         .join(", ");
-      setCheckResult(`완료 (${summary})`);
+      setCheckMsg(`✓ 완료 — ${summary}`);
       await loadRankings();
     } catch (err) {
-      setCheckResult(
-        `오류: ${err instanceof Error ? err.message : "알 수 없는 오류"}`
-      );
+      setCheckMsg(`오류: ${err instanceof Error ? err.message : "알 수 없는 오류"}`);
     } finally {
       setChecking(false);
     }
   }
 
+  async function handleAddKeyword() {
+    const kw = newKeyword.trim();
+    if (!kw || place.keywords.includes(kw)) return;
+    setKeywordLoading(true);
+    try {
+      const updated = await updatePlaceKeywords(place.id, [
+        ...place.keywords,
+        kw,
+      ]);
+      onPlaceUpdated(updated);
+      setNewKeyword("");
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "키워드 추가 실패");
+    } finally {
+      setKeywordLoading(false);
+    }
+  }
+
+  async function handleRemoveKeyword(kw: string) {
+    if (!confirm(`"${kw}" 키워드를 삭제하시겠습니까?`)) return;
+    setKeywordLoading(true);
+    try {
+      const updated = await updatePlaceKeywords(
+        place.id,
+        place.keywords.filter((k) => k !== kw)
+      );
+      onPlaceUpdated(updated);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "키워드 삭제 실패");
+    } finally {
+      setKeywordLoading(false);
+    }
+  }
+
   async function handleDelete() {
-    if (!confirm(`"${place.name}"을 삭제하시겠습니까? 모든 순위 기록도 삭제됩니다.`))
+    if (
+      !confirm(
+        `"${place.name}"을 삭제하시겠습니까?\n모든 순위 기록도 삭제됩니다.`
+      )
+    )
       return;
     setDeleting(true);
     try {
@@ -243,115 +447,94 @@ function PlaceDetail({
     }
   }
 
-  const latestRankings = computeLatestRankings(rankings);
+  const tables = buildKeywordTables(rankings, place.keywords);
+  const naverUrl = `https://m.place.naver.com/restaurant/${place.naver_place_id}`;
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* 헤더 */}
-      <div className="p-5 border-b border-gray-100">
-        <div className="flex items-start justify-between">
+      {/* 상단 바 */}
+      <div className="px-6 py-4 border-b border-gray-200 bg-white shrink-0">
+        <div className="flex items-center justify-between gap-4">
           <div>
             <h2 className="text-lg font-bold text-gray-900">{place.name}</h2>
-            <p className="text-xs text-gray-500 mt-0.5">
-              플레이스 ID: {place.naver_place_id}
-            </p>
-          </div>
-          <button
-            onClick={handleDelete}
-            disabled={deleting}
-            className="text-red-500 hover:text-red-700 text-xs px-2 py-1 rounded hover:bg-red-50 transition-colors"
-          >
-            {deleting ? "삭제 중..." : "삭제"}
-          </button>
-        </div>
-
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {place.keywords.map((kw) => (
-            <span
-              key={kw}
-              className="bg-blue-50 text-blue-700 text-xs rounded-full px-2.5 py-0.5"
+            <a
+              href={naverUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-blue-600 hover:underline"
             >
-              {kw}
-            </span>
-          ))}
+              네이버 플레이스 바로가기 ↗
+            </a>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCheckRank}
+              disabled={checking}
+              className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors whitespace-nowrap"
+            >
+              {checking ? "조회 중..." : "지금 순위 체크"}
+            </button>
+            <button
+              onClick={handleDelete}
+              disabled={deleting}
+              className="text-red-500 hover:text-red-700 text-xs px-3 py-2 rounded-lg hover:bg-red-50 transition-colors"
+            >
+              {deleting ? "삭제 중..." : "매장 삭제"}
+            </button>
+          </div>
         </div>
-      </div>
 
-      {/* 순위 체크 버튼 */}
-      <div className="p-5 border-b border-gray-100">
-        <button
-          onClick={handleCheckRank}
-          disabled={checking}
-          className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white font-medium rounded-lg py-2.5 text-sm transition-colors"
-        >
-          {checking ? "순위 조회 중... (최대 수분 소요)" : "지금 순위 체크"}
-        </button>
-        {checkResult && (
+        {checkMsg && (
           <p
-            className={`text-xs mt-2 ${checkResult.startsWith("오류") ? "text-red-600" : "text-emerald-700"}`}
+            className={`text-xs mt-2 ${checkMsg.startsWith("오류") ? "text-red-600" : "text-emerald-700"}`}
           >
-            {checkResult}
+            {checkMsg}
           </p>
         )}
       </div>
 
-      {/* 키워드별 최신 순위 */}
-      {latestRankings.length > 0 && (
-        <div className="p-5 border-b border-gray-100">
-          <h3 className="text-sm font-semibold text-gray-700 mb-3">
-            키워드별 최신 순위
-          </h3>
-          <div className="space-y-2">
-            {latestRankings.map((lr) => (
-              <div
-                key={lr.keyword}
-                className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2"
-              >
-                <span className="text-sm text-gray-800">{lr.keyword}</span>
-                <div className="flex items-center gap-2">
-                  <RankBadge rank={lr.rank} />
-                  <RankChange curr={lr.rank} prev={lr.prevRank} />
-                </div>
-              </div>
-            ))}
+      {/* 본문 스크롤 영역 */}
+      <div className="flex-1 overflow-auto p-6 bg-gray-50">
+        {loadingData ? (
+          <div className="flex items-center justify-center h-32 text-gray-400 text-sm">
+            데이터 불러오는 중...
           </div>
-        </div>
-      )}
-
-      {/* 순위 히스토리 */}
-      <div className="flex-1 overflow-auto p-5">
-        <h3 className="text-sm font-semibold text-gray-700 mb-3">
-          순위 히스토리
-        </h3>
-        {loadingHistory ? (
-          <p className="text-sm text-gray-400">불러오는 중...</p>
-        ) : rankings.length === 0 ? (
-          <p className="text-sm text-gray-400">
-            아직 순위 기록이 없습니다. 순위 체크를 실행해주세요.
-          </p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-gray-500 border-b border-gray-100">
-                  <th className="text-left pb-2 font-medium">날짜</th>
-                  <th className="text-left pb-2 font-medium">키워드</th>
-                  <th className="text-right pb-2 font-medium">순위</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rankings.map((r) => (
-                  <tr key={r.id} className="border-b border-gray-50 hover:bg-gray-50">
-                    <td className="py-1.5 text-gray-500">{formatDate(r.checked_at)}</td>
-                    <td className="py-1.5 text-gray-700">{r.keyword}</td>
-                    <td className="py-1.5 text-right">
-                      <RankBadge rank={r.rank} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            {/* 키워드 테이블들 */}
+            {tables.map((t) => (
+              <KeywordTable
+                key={t.keyword}
+                table={t}
+                place={place}
+                onRemoveKeyword={handleRemoveKeyword}
+              />
+            ))}
+
+            {/* 키워드 추가 */}
+            <div className="border border-dashed border-gray-300 rounded-xl p-4 bg-white">
+              <p className="text-sm font-medium text-gray-700 mb-2">
+                + 키워드 추가
+              </p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newKeyword}
+                  onChange={(e) => setNewKeyword(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleAddKeyword()}
+                  placeholder="예: 동래밥집"
+                  className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+                <button
+                  onClick={handleAddKeyword}
+                  disabled={keywordLoading || !newKeyword.trim()}
+                  className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white text-sm px-4 py-2 rounded-lg transition-colors"
+                >
+                  {keywordLoading ? "..." : "추가"}
+                </button>
+              </div>
+            </div>
+          </>
         )}
       </div>
     </div>
@@ -374,7 +557,7 @@ export default function DashboardPage() {
       return;
     }
     loadPlaces();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function loadPlaces() {
@@ -408,15 +591,17 @@ export default function DashboardPage() {
     setSelectedPlace(place);
   }
 
+  function handlePlaceUpdated(updated: Place) {
+    setPlaces((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+    if (selectedPlace?.id === updated.id) setSelectedPlace(updated);
+  }
+
   function handlePlaceDeleted() {
     if (!selectedPlace) return;
     const remaining = places.filter((p) => p.id !== selectedPlace.id);
     setPlaces(remaining);
     setSelectedPlace(remaining[0] ?? null);
   }
-
-  // 좌측 매장 목록에서 각 매장의 최신 순위 표시는 별도 API 없이 단순화
-  // (대시보드 로딩 시마다 rankings를 전부 불러오면 과도한 요청)
 
   return (
     <div className="h-screen flex flex-col bg-gray-50">
@@ -436,9 +621,9 @@ export default function DashboardPage() {
 
       {/* 바디 */}
       <div className="flex flex-1 overflow-hidden">
-        {/* 좌측: 매장 목록 */}
-        <aside className="w-64 bg-white border-r border-gray-200 flex flex-col shrink-0">
-          <div className="p-4 border-b border-gray-100">
+        {/* 좌측 사이드바: 매장 목록 */}
+        <aside className="w-56 bg-white border-r border-gray-200 flex flex-col shrink-0">
+          <div className="p-3 border-b border-gray-100">
             <button
               onClick={() => setShowAddModal(true)}
               className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg py-2 transition-colors"
@@ -449,51 +634,55 @@ export default function DashboardPage() {
 
           <div className="flex-1 overflow-y-auto">
             {loading ? (
-              <p className="text-sm text-gray-400 text-center py-8">불러오는 중...</p>
+              <p className="text-xs text-gray-400 text-center py-8">
+                불러오는 중...
+              </p>
             ) : error ? (
-              <p className="text-sm text-red-500 text-center py-8">{error}</p>
+              <p className="text-xs text-red-500 text-center py-8">{error}</p>
             ) : places.length === 0 ? (
-              <p className="text-sm text-gray-400 text-center py-8">
-                등록된 매장이 없습니다
+              <p className="text-xs text-gray-400 text-center py-8">
+                매장을 추가해주세요
               </p>
             ) : (
               <ul>
-                {places.map((place) => (
-                  <li key={place.id}>
-                    <button
-                      onClick={() => setSelectedPlace(place)}
-                      className={`w-full text-left px-4 py-3 hover:bg-gray-50 transition-colors border-b border-gray-50 ${
-                        selectedPlace?.id === place.id
-                          ? "bg-blue-50 border-l-4 border-l-blue-500"
-                          : ""
-                      }`}
-                    >
-                      <div
-                        className={`text-sm font-medium ${
-                          selectedPlace?.id === place.id
-                            ? "text-blue-700"
-                            : "text-gray-800"
+                {places.map((place) => {
+                  const isSelected = selectedPlace?.id === place.id;
+                  return (
+                    <li key={place.id}>
+                      <button
+                        onClick={() => setSelectedPlace(place)}
+                        className={`w-full text-left px-3 py-3 transition-colors border-b border-gray-50 ${
+                          isSelected
+                            ? "bg-blue-50 border-l-[3px] border-l-blue-500"
+                            : "hover:bg-gray-50 border-l-[3px] border-l-transparent"
                         }`}
                       >
-                        {place.name}
-                      </div>
-                      <div className="text-xs text-gray-400 mt-0.5 truncate">
-                        {place.keywords.join(", ")}
-                      </div>
-                    </button>
-                  </li>
-                ))}
+                        <div
+                          className={`text-sm font-medium truncate ${
+                            isSelected ? "text-blue-700" : "text-gray-800"
+                          }`}
+                        >
+                          {place.name}
+                        </div>
+                        <div className="text-xs text-gray-400 mt-0.5 truncate">
+                          {place.keywords.join(", ") || "키워드 없음"}
+                        </div>
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </div>
         </aside>
 
-        {/* 우측: 상세 */}
-        <main className="flex-1 overflow-hidden bg-white">
+        {/* 우측 메인 */}
+        <main className="flex-1 overflow-hidden bg-gray-50">
           {selectedPlace ? (
-            <PlaceDetail
+            <PlaceMain
               key={selectedPlace.id}
               place={selectedPlace}
+              onPlaceUpdated={handlePlaceUpdated}
               onDeleted={handlePlaceDeleted}
             />
           ) : (
