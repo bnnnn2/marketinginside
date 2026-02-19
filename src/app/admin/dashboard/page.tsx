@@ -558,6 +558,7 @@ export default function DashboardPage() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
 
   useEffect(() => {
     const token = localStorage.getItem("admin_token");
@@ -632,13 +633,20 @@ export default function DashboardPage() {
       <div className="flex flex-1 overflow-hidden">
         {/* 좌측 사이드바: 매장 목록 */}
         <aside className="w-56 bg-white border-r border-gray-200 flex flex-col shrink-0">
-          <div className="p-3 border-b border-gray-100">
+          <div className="p-3 space-y-2 border-b border-gray-100">
             <button
               onClick={() => setShowAddModal(true)}
               className="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg py-2 transition-colors"
             >
               + 매장 추가
             </button>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="매장 검색..."
+              className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-xs text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-400"
+            />
           </div>
 
           <div className="flex-1 overflow-y-auto">
@@ -654,7 +662,11 @@ export default function DashboardPage() {
               </p>
             ) : (
               <ul>
-                {places.map((place) => {
+                {places
+                  .filter((p) =>
+                    p.name.toLowerCase().includes(search.toLowerCase())
+                  )
+                  .map((place) => {
                   const isSelected = selectedPlace?.id === place.id;
                   return (
                     <li key={place.id}>
