@@ -31,6 +31,12 @@ function fmt(n: number | null, unit = ""): string {
   return n.toLocaleString() + unit;
 }
 
+function fmtCap(n: number | null, unit = ""): string {
+  if (n == null) return "-";
+  if (n > 9999) return "9,999+" + unit;
+  return n.toLocaleString() + unit;
+}
+
 // rankings 배열 → 키워드별 날짜 테이블 데이터 변환
 function buildKeywordTables(
   rankings: Ranking[],
@@ -96,10 +102,10 @@ function RankDisplay({ rank }: { rank: number | null }) {
   return <span className="text-gray-800 text-xl font-bold">{rank}위</span>;
 }
 
-// 날짜별 카드 셀 (고정 크기)
+// 날짜별 카드 셀
 function DayCard({ dk, data }: { dk: string; data: DayData }) {
   return (
-    <div className="w-[110px] min-w-[110px] bg-white border border-gray-200 rounded-xl p-3 flex flex-col items-center gap-1 shadow-sm">
+    <div className="flex-1 min-w-[100px] max-w-[180px] bg-white border border-gray-200 rounded-xl p-3 flex flex-col items-center gap-1 shadow-sm">
       <span className="text-xs text-gray-500 font-medium">{formatDateLabel(dk)}</span>
       <div className="mt-0.5">
         <RankDisplay rank={data.rank} />
@@ -109,19 +115,15 @@ function DayCard({ dk, data }: { dk: string; data: DayData }) {
       </div>
       <div className="w-full border-t border-gray-100 pt-1.5 mt-0.5 space-y-0.5 text-xs text-gray-600">
         <div className="flex justify-between gap-1">
-          <span className="text-blue-600 font-medium">블</span>
-          <span>{fmt(data.blog_count, "개")}</span>
+          <span className="text-blue-600 font-medium">블로그</span>
+          <span>{fmtCap(data.blog_count, "개")}</span>
         </div>
         <div className="flex justify-between gap-1">
-          <span className="text-emerald-600 font-medium">방</span>
-          <span>{fmt(data.visitor_review_count, "개")}</span>
+          <span className="text-emerald-600 font-medium">영수증</span>
+          <span>{fmtCap(data.visitor_review_count, "개")}</span>
         </div>
         <div className="flex justify-between gap-1">
-          <span className="text-purple-600 font-medium">월</span>
-          <span>{fmt(data.monthly_review_count, "건")}</span>
-        </div>
-        <div className="flex justify-between gap-1">
-          <span className="text-orange-600 font-medium">업</span>
+          <span className="text-orange-600 font-medium">업체수</span>
           <span>{fmt(data.business_count, "개")}</span>
         </div>
       </div>
