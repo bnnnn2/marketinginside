@@ -1,5 +1,6 @@
 // Cloudflare Pages Function: POST /api/check-rank
 // 네이버 플레이스 순위 조회 후 Supabase에 저장
+// 모바일 기준, 광고 제외
 
 import { verifyToken } from "../_shared/verify-token";
 
@@ -18,44 +19,80 @@ function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), { status, headers: CORS_HEADERS });
 }
 
-interface NaverPlace {
+const GRAPHQL_ENDPOINT = "https://pcmap-api.place.naver.com/place/graphql";
+const DISPLAY = 15;
+
+const GQL_QUERY = `
+query getRestaurants($restaurantListInput: RestaurantListInput) {
+  restaurantList(input: $restaurantListInput) {
+    items {
+      id
+      name
+      dbType
+    }
+    total
+  }
+}`;
+
+interface NaverItem {
   id: string;
   name: string;
+  dbType: string;
 }
 
-interface NaverSearchResponse {
-  result?: {
-    place?: {
-      list?: NaverPlace[];
-      totalCount?: number;
+interface NaverGQLResponse {
+  data?: {
+    restaurantList?: {
+      items: NaverItem[];
+      total: number;
     };
   };
+  errors?: Array<{ message: string }>;
 }
 
-// 네이버 플레이스 검색 API 호출 (1-indexed page)
-async function searchNaver(
+// 네이버 플레이스 GraphQL API 호출 (모바일 기준)
+async function searchNaverPage(
   keyword: string,
-  page: number
-): Promise<NaverPlace[]> {
-  const url = `https://map.naver.com/p/api/search/allSearch?query=${encodeURIComponent(keyword)}&type=place&page=${page}`;
+  start: number
+): Promise<NaverItem[]> {
+  const payload = {
+    operationName: "getRestaurants",
+    variables: {
+      restaurantListInput: {
+        query: keyword,
+        start,
+        display: DISPLAY,
+      },
+    },
+    query: GQL_QUERY,
+  };
 
-  const resp = await fetch(url, {
+  const resp = await fetch(GRAPHQL_ENDPOINT, {
+    method: "POST",
     headers: {
+      "Content-Type": "application/json",
+      "x-apollo-operation-name": "getRestaurants",
       "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      Referer: "https://map.naver.com/",
-      Accept: "application/json, text/plain, */*",
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+      Referer: "https://m.place.naver.com/",
+      Accept: "application/json",
       "Accept-Language": "ko-KR,ko;q=0.9",
     },
+    body: JSON.stringify(payload),
   });
 
   if (!resp.ok) return [];
 
-  const data = (await resp.json()) as NaverSearchResponse;
-  return data?.result?.place?.list ?? [];
+  const data = (await resp.json()) as NaverGQLResponse;
+  if (data.errors?.length) return [];
+
+  // 광고(dbType !== 'drt') 제외
+  return (data.data?.restaurantList?.items ?? []).filter(
+    (item) => item.dbType === "drt"
+  );
 }
 
-// 특정 placeId의 순위 탐색 (최대 maxPages 페이지)
+// 특정 placeId의 순위 탐색 (최대 maxPages 페이지, 총 300위)
 async function findRank(
   keyword: string,
   placeId: string,
@@ -64,9 +101,10 @@ async function findRank(
   let rank = 0;
 
   for (let page = 1; page <= maxPages; page++) {
-    const results = await searchNaver(keyword, page);
+    const start = (page - 1) * DISPLAY + 1;
+    const results = await searchNaverPage(keyword, start);
 
-    if (results.length === 0) break; // 더 이상 결과 없음
+    if (results.length === 0) break;
 
     for (const item of results) {
       rank++;
@@ -75,8 +113,7 @@ async function findRank(
       }
     }
 
-    // 결과가 15개 미만이면 마지막 페이지
-    if (results.length < 15) break;
+    if (results.length < DISPLAY) break;
   }
 
   return null; // 300위 밖
@@ -91,26 +128,27 @@ export async function onRequestPost(context: any): Promise<Response> {
     return json({ error: "인증이 필요합니다." }, 401);
   }
 
-  const body = await context.request.json() as {
-    place_id: string;        // Supabase places.id (UUID)
-    naver_place_id: string;  // 네이버 플레이스 ID
+  const body = (await context.request.json()) as {
+    place_id: string;
+    naver_place_id: string;
     keywords: string[];
   };
 
   if (!body.place_id || !body.naver_place_id || !body.keywords?.length) {
-    return json({ error: "place_id, naver_place_id, keywords 필드가 필요합니다." }, 400);
+    return json(
+      { error: "place_id, naver_place_id, keywords 필드가 필요합니다." },
+      400
+    );
   }
 
   const results: { keyword: string; rank: number | null }[] = [];
   const checkedAt = new Date().toISOString();
 
-  // 키워드별 순위 조회 (순차 실행으로 과도한 요청 방지)
   for (const keyword of body.keywords) {
     const rank = await findRank(keyword, body.naver_place_id);
     results.push({ keyword, rank });
   }
 
-  // Supabase에 rankings 저장
   const rows = results.map((r) => ({
     place_id: body.place_id,
     keyword: r.keyword,
