@@ -105,7 +105,7 @@ function RankDisplay({ rank }: { rank: number | null }) {
 // 날짜별 카드 셀
 function DayCard({ dk, data }: { dk: string; data: DayData }) {
   return (
-    <div className="w-[110px] shrink-0 md:flex-1 md:w-auto md:min-w-[100px] md:max-w-[180px] bg-white border border-gray-200 rounded-xl p-3 flex flex-col items-center gap-1 shadow-sm">
+    <div className="snap-start w-[110px] shrink-0 md:flex-1 md:w-auto md:min-w-[100px] md:max-w-[180px] bg-white border border-gray-200 rounded-xl p-3 flex flex-col items-center gap-1 shadow-sm">
       <span className="text-xs text-gray-500 font-medium">{formatDateLabel(dk)}</span>
       <div className="mt-0.5">
         <RankDisplay rank={data.rank} />
@@ -202,7 +202,7 @@ function KeywordTable({
             순위 체크를 실행하면 데이터가 표시됩니다.
           </p>
         ) : (
-          <div className="overflow-x-auto pb-1 -mx-1 px-1">
+          <div className="overflow-x-auto pb-1 -mx-1 px-1 snap-x snap-mandatory md:snap-none">
             <div className="flex items-start gap-3 w-max md:w-auto">
               {displayDates.map((dk) => (
                 <DayCard key={dk} dk={dk} data={table.dataByDate[dk]} />
