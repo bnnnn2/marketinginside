@@ -105,7 +105,7 @@ function RankDisplay({ rank }: { rank: number | null }) {
 // 날짜별 카드 셀
 function DayCard({ dk, data }: { dk: string; data: DayData }) {
   return (
-    <div className="flex-1 min-w-[100px] max-w-[180px] bg-white border border-gray-200 rounded-xl p-3 flex flex-col items-center gap-1 shadow-sm">
+    <div className="w-[110px] shrink-0 md:flex-1 md:w-auto md:min-w-[100px] md:max-w-[180px] bg-white border border-gray-200 rounded-xl p-3 flex flex-col items-center gap-1 shadow-sm">
       <span className="text-xs text-gray-500 font-medium">{formatDateLabel(dk)}</span>
       <div className="mt-0.5">
         <RankDisplay rank={data.rank} />
@@ -202,22 +202,24 @@ function KeywordTable({
             순위 체크를 실행하면 데이터가 표시됩니다.
           </p>
         ) : (
-          <div className="flex items-start gap-3">
-            {displayDates.map((dk) => (
-              <DayCard key={dk} dk={dk} data={table.dataByDate[dk]} />
-            ))}
-            {hasMore && (
-              <div className="self-center ml-1">
-                <button
-                  onClick={() => setShowModal(true)}
-                  className="text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-3 py-4 rounded-xl border border-blue-200 whitespace-nowrap transition-colors text-center leading-relaxed"
-                >
-                  전체 기록<br />보기<br />
-                  <span className="font-semibold">({table.dates.length}일)</span>
-                  <br />→
-                </button>
-              </div>
-            )}
+          <div className="overflow-x-auto pb-1 -mx-1 px-1">
+            <div className="flex items-start gap-3 w-max md:w-auto">
+              {displayDates.map((dk) => (
+                <DayCard key={dk} dk={dk} data={table.dataByDate[dk]} />
+              ))}
+              {hasMore && (
+                <div className="self-center ml-1 shrink-0">
+                  <button
+                    onClick={() => setShowModal(true)}
+                    className="text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-3 py-4 rounded-xl border border-blue-200 whitespace-nowrap transition-colors text-center leading-relaxed"
+                  >
+                    전체 기록<br />보기<br />
+                    <span className="font-semibold">({table.dates.length}일)</span>
+                    <br />→
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -559,6 +561,7 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem("admin_token");
@@ -616,10 +619,19 @@ export default function DashboardPage() {
   return (
     <div className="h-screen flex flex-col bg-gray-50">
       {/* 헤더 */}
-      <header className="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-3">
+      <header className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-2">
+          {/* 햄버거 버튼 (모바일 전용) */}
+          <button
+            className="md:hidden p-1.5 rounded-lg hover:bg-gray-100 text-gray-600 transition-colors"
+            onClick={() => setSidebarOpen(true)}
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
           <span className="text-blue-600 font-bold">마케팅인사이드</span>
-          <span className="text-gray-400 text-sm">관리자</span>
+          <span className="text-gray-400 text-sm hidden sm:inline">관리자</span>
         </div>
         <button
           onClick={handleLogout}
@@ -629,10 +641,36 @@ export default function DashboardPage() {
         </button>
       </header>
 
+      {/* 모바일 사이드바 백드롭 */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/40 z-30 md:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* 바디 */}
       <div className="flex flex-1 overflow-hidden">
         {/* 좌측 사이드바: 매장 목록 */}
-        <aside className="w-56 bg-white border-r border-gray-200 flex flex-col shrink-0">
+        <aside className={`
+          fixed inset-y-0 left-0 z-40 w-64 bg-white border-r border-gray-200 flex flex-col
+          transform transition-transform duration-300 ease-in-out
+          ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}
+          md:relative md:translate-x-0 md:w-56 md:shrink-0 md:z-auto
+        `}>
+          {/* 모바일 닫기 버튼 */}
+          <div className="md:hidden flex items-center justify-between px-3 pt-3 pb-1">
+            <span className="text-sm font-semibold text-gray-700">매장 목록</span>
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-500 transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
           <div className="p-3 space-y-2 border-b border-gray-100">
             <button
               onClick={() => setShowAddModal(true)}
@@ -671,7 +709,7 @@ export default function DashboardPage() {
                   return (
                     <li key={place.id}>
                       <button
-                        onClick={() => setSelectedPlace(place)}
+                        onClick={() => { setSelectedPlace(place); setSidebarOpen(false); }}
                         className={`w-full text-left px-3 py-3 transition-colors border-b border-gray-50 ${
                           isSelected
                             ? "bg-blue-50 border-l-[3px] border-l-blue-500"
