@@ -34,8 +34,7 @@ function fmt(n: number | null, unit = ""): string {
 // rankings 배열 → 키워드별 날짜 테이블 데이터 변환
 function buildKeywordTables(
   rankings: Ranking[],
-  keywords: string[],
-  maxDates = 14
+  keywords: string[]
 ): KeywordTableData[] {
   return keywords.map((kw) => {
     const kwRows = rankings
@@ -52,10 +51,8 @@ function buildKeywordTables(
       if (!byDate[dk]) byDate[dk] = r;
     }
 
-    // 최신순 날짜 배열 (최대 maxDates)
-    const sortedDates = Object.keys(byDate)
-      .sort((a, b) => b.localeCompare(a))
-      .slice(0, maxDates);
+    // 최신순 날짜 배열 (전체)
+    const sortedDates = Object.keys(byDate).sort((a, b) => b.localeCompare(a));
 
     const dataByDate: Record<string, DayData> = {};
     for (let i = 0; i < sortedDates.length; i++) {
@@ -99,7 +96,74 @@ function RankDisplay({ rank }: { rank: number | null }) {
   return <span className="text-gray-800 text-xl font-bold">{rank}위</span>;
 }
 
-// 키워드 테이블 1개
+// 날짜별 카드 셀 (고정 크기)
+function DayCard({ dk, data }: { dk: string; data: DayData }) {
+  return (
+    <div className="w-[110px] min-w-[110px] bg-white border border-gray-200 rounded-xl p-3 flex flex-col items-center gap-1 shadow-sm">
+      <span className="text-xs text-gray-500 font-medium">{formatDateLabel(dk)}</span>
+      <div className="mt-0.5">
+        <RankDisplay rank={data.rank} />
+      </div>
+      <div>
+        <RankChange curr={data.rank} prev={data.prevRank} />
+      </div>
+      <div className="w-full border-t border-gray-100 pt-1.5 mt-0.5 space-y-0.5 text-xs text-gray-600">
+        <div className="flex justify-between gap-1">
+          <span className="text-blue-600 font-medium">블</span>
+          <span>{fmt(data.blog_count, "개")}</span>
+        </div>
+        <div className="flex justify-between gap-1">
+          <span className="text-emerald-600 font-medium">방</span>
+          <span>{fmt(data.visitor_review_count, "개")}</span>
+        </div>
+        <div className="flex justify-between gap-1">
+          <span className="text-purple-600 font-medium">월</span>
+          <span>{fmt(data.monthly_review_count, "건")}</span>
+        </div>
+        <div className="flex justify-between gap-1">
+          <span className="text-orange-600 font-medium">업</span>
+          <span>{fmt(data.business_count, "개")}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 전체 기록 모달
+function RankHistoryModal({
+  table,
+  onClose,
+}: {
+  table: KeywordTableData;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-50 rounded-2xl shadow-2xl w-full max-w-3xl max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white rounded-t-2xl shrink-0">
+          <h3 className="text-base font-bold text-gray-900">
+            🔍 {table.keyword} — 전체 기록 ({table.dates.length}일)
+          </h3>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-700 text-lg font-medium px-2 py-1 rounded hover:bg-gray-100 transition-colors"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="overflow-y-auto p-6">
+          <div className="flex flex-wrap gap-3">
+            {table.dates.map((dk) => (
+              <DayCard key={dk} dk={dk} data={table.dataByDate[dk]} />
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 키워드 카드 뷰 1개
 function KeywordTable({
   table,
   place,
@@ -109,117 +173,55 @@ function KeywordTable({
   place: Place;
   onRemoveKeyword: (kw: string) => void;
 }) {
+  const [showModal, setShowModal] = useState(false);
   const naverUrl = `https://m.place.naver.com/restaurant/${place.naver_place_id}`;
+  const displayDates = table.dates.slice(0, 7);
+  const hasMore = table.dates.length > 7;
 
   return (
-    <div className="mb-6 border border-gray-200 rounded-xl overflow-hidden shadow-sm">
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs border-collapse min-w-max">
-          {/* 헤더 1행: 키워드명 | 네이버URL + 매장명 */}
-          <thead>
-            <tr className="bg-gray-800 text-white">
-              <td
-                colSpan={table.dates.length + 1}
-                className="px-4 py-2.5"
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <span className="font-bold text-sm">
-                    🔍 {table.keyword}
-                  </span>
-                  <a
-                    href={naverUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-300 hover:text-blue-200 underline truncate max-w-xs"
-                  >
-                    naver.com ↗ {place.name}
-                  </a>
-                </div>
-              </td>
-            </tr>
-            {/* 헤더 2행: 날짜 컬럼 */}
-            <tr className="bg-gray-100 text-gray-600">
-              <th className="px-3 py-2 text-left font-medium w-16 border-r border-gray-200">
-                날짜
-              </th>
-              {table.dates.length === 0 ? (
-                <th className="px-3 py-2 text-center text-gray-400 italic">
-                  순위 데이터 없음
-                </th>
-              ) : (
-                table.dates.map((dk) => (
-                  <th
-                    key={dk}
-                    className="px-3 py-2 text-center font-medium min-w-[100px] border-l border-gray-200"
-                  >
-                    {formatDateLabel(dk)}
-                  </th>
-                ))
-              )}
-            </tr>
-          </thead>
+    <div className="mb-6 border border-gray-200 rounded-xl overflow-hidden shadow-sm bg-white">
+      {/* 헤더 */}
+      <div className="bg-gray-800 text-white px-4 py-2.5 flex items-center justify-between gap-4">
+        <span className="font-bold text-sm">🔍 {table.keyword}</span>
+        <a
+          href={naverUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-300 hover:text-blue-200 underline truncate max-w-xs text-xs"
+        >
+          naver.com ↗ {place.name}
+        </a>
+      </div>
 
-          {/* 본문: 단일 데이터 행 */}
-          <tbody>
-            {table.dates.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={2}
-                  className="px-4 py-6 text-center text-gray-400"
+      {/* 카드 영역 */}
+      <div className="p-4 bg-gray-50">
+        {table.dates.length === 0 ? (
+          <p className="text-center text-gray-400 text-sm py-6">
+            순위 체크를 실행하면 데이터가 표시됩니다.
+          </p>
+        ) : (
+          <div className="flex items-start gap-3">
+            {displayDates.map((dk) => (
+              <DayCard key={dk} dk={dk} data={table.dataByDate[dk]} />
+            ))}
+            {hasMore && (
+              <div className="self-center ml-1">
+                <button
+                  onClick={() => setShowModal(true)}
+                  className="text-xs text-blue-600 hover:text-blue-800 hover:bg-blue-50 px-3 py-4 rounded-xl border border-blue-200 whitespace-nowrap transition-colors text-center leading-relaxed"
                 >
-                  순위 체크를 실행하면 데이터가 표시됩니다.
-                </td>
-              </tr>
-            ) : (
-              <tr className="bg-white hover:bg-gray-50 transition-colors">
-                <td className="px-3 py-3 border-r border-gray-100 text-gray-500 font-medium text-center">
-                  데이터
-                </td>
-                {table.dates.map((dk) => {
-                  const d: DayData = table.dataByDate[dk];
-                  return (
-                    <td
-                      key={dk}
-                      className="px-3 py-3 border-l border-gray-100 text-center align-top"
-                    >
-                      {/* 순위 */}
-                      <div className="mb-1">
-                        <RankDisplay rank={d.rank} />
-                      </div>
-                      {/* 변동폭 */}
-                      <div className="mb-2">
-                        <RankChange curr={d.rank} prev={d.prevRank} />
-                      </div>
-                      {/* 부가 데이터 */}
-                      <div className="space-y-0.5 text-gray-600 text-xs">
-                        <div>
-                          <span className="text-blue-600 font-medium">블</span>{" "}
-                          {fmt(d.blog_count, "개")}
-                        </div>
-                        <div>
-                          <span className="text-emerald-600 font-medium">방</span>{" "}
-                          {fmt(d.visitor_review_count, "개")}
-                        </div>
-                        <div>
-                          <span className="text-purple-600 font-medium">월</span>{" "}
-                          {fmt(d.monthly_review_count, "건")}
-                        </div>
-                        <div>
-                          <span className="text-orange-600 font-medium">업</span>{" "}
-                          {fmt(d.business_count, "개")}
-                        </div>
-                      </div>
-                    </td>
-                  );
-                })}
-              </tr>
+                  전체 기록<br />보기<br />
+                  <span className="font-semibold">({table.dates.length}일)</span>
+                  <br />→
+                </button>
+              </div>
             )}
-          </tbody>
-        </table>
+          </div>
+        )}
       </div>
 
       {/* 키워드 삭제 버튼 */}
-      <div className="flex justify-end px-4 py-2 bg-gray-50 border-t border-gray-200">
+      <div className="flex justify-end px-4 py-2 bg-white border-t border-gray-200">
         <button
           onClick={() => onRemoveKeyword(table.keyword)}
           className="text-xs text-red-500 hover:text-red-700 hover:bg-red-50 px-2 py-1 rounded transition-colors"
@@ -227,6 +229,11 @@ function KeywordTable({
           ✕ &quot;{table.keyword}&quot; 키워드 삭제
         </button>
       </div>
+
+      {/* 전체 기록 모달 */}
+      {showModal && (
+        <RankHistoryModal table={table} onClose={() => setShowModal(false)} />
+      )}
     </div>
   );
 }
