@@ -39,7 +39,7 @@ export const metadata: Metadata = {
     title: "마케팅인사이드 | 플레이스 상위노출 · 블로그체험단 전문",
     description:
       "네이버 플레이스 상위노출과 블로그체험단 전문 마케팅 대행사. 실질적인 성과로 내 가게 매출을 높여드립니다.",
-    url: "https://marketinginside.co.kr",
+    url: "https://marketinginside.pages.dev",
     siteName: "마케팅인사이드",
     locale: "ko_KR",
     type: "website",
@@ -74,7 +74,7 @@ const jsonLd = {
   name: "마케팅인사이드",
   alternateName: "Marketing Inside",
   description: "네이버 플레이스 상위노출과 블로그체험단 전문 마케팅 대행사",
-  url: "https://marketinginside.co.kr",
+  url: "https://marketinginside.pages.dev",
   // 나중에 실제 정보로 교체
   // telephone: "+82-10-XXXX-XXXX",
   // address: {

@@ -8,6 +8,6 @@ export default function robots(): MetadataRoute.Robots {
       userAgent: "*",
       allow: "/",
     },
-    sitemap: "https://marketinginside.co.kr/sitemap.xml",
+    sitemap: "https://marketinginside.pages.dev/sitemap.xml",
   };
 }

@@ -259,16 +259,16 @@ export default function Home() {
             카카오톡 또는 전화로 편하게 연락주세요.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            {/* 카카오 채널 링크 — 나중에 실제 URL로 교체 */}
+            {/* TODO: 카카오 채널 개설 후 href를 실제 URL로 교체 */}
             <a
-              href="http://pf.kakao.com/_마케팅인사이드채널"
+              href="#contact"
               className="bg-yellow-400 hover:bg-yellow-300 text-gray-900 font-bold px-8 py-4 rounded-xl text-lg transition-colors flex items-center justify-center gap-2"
             >
               💬 카카오톡 상담
             </a>
-            {/* 전화번호 — 나중에 실제 번호로 교체 */}
+            {/* TODO: 실제 전화번호로 교체 */}
             <a
-              href="tel:010-0000-0000"
+              href="#contact"
               className="bg-white/20 hover:bg-white/30 text-white font-bold px-8 py-4 rounded-xl text-lg transition-colors border border-white/30 flex items-center justify-center gap-2"
             >
               📞 전화 상담
@@ -324,7 +324,7 @@ export default function Home() {
           </div>
 
           <div className="border-t border-gray-800 mt-10 pt-8 text-center text-sm text-gray-600">
-            <p>© 2025 마케팅인사이드. All rights reserved.</p>
+            <p>© {new Date().getFullYear()} 마케팅인사이드. All rights reserved.</p>
           </div>
         </div>
       </footer>
