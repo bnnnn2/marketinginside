@@ -32,8 +32,9 @@ const GRAPHQL_ENDPOINT = "https://pcmap-api.place.naver.com/place/graphql";
 const DISPLAY = 15;
 
 const GQL_QUERY = `
-query getRestaurants($restaurantListInput: RestaurantListInput) {
-  restaurantList(input: $restaurantListInput) {
+query getPlacesList($input: PlacesInput) {
+  businesses: places(input: $input) {
+    total
     items {
       id
       name
@@ -41,7 +42,6 @@ query getRestaurants($restaurantListInput: RestaurantListInput) {
       visitorReviewCount
       blogCafeReviewCount
     }
-    total
   }
 }`;
 
@@ -55,7 +55,7 @@ interface NaverItem {
 
 interface NaverGQLResponse {
   data?: {
-    restaurantList?: {
+    businesses?: {
       items: NaverItem[];
       total: number;
     };
@@ -68,9 +68,9 @@ async function searchNaverPage(
   start: number
 ): Promise<{ items: NaverItem[]; total: number }> {
   const payload = {
-    operationName: "getRestaurants",
+    operationName: "getPlacesList",
     variables: {
-      restaurantListInput: { query: keyword, start, display: DISPLAY },
+      input: { query: keyword, start, display: DISPLAY },
     },
     query: GQL_QUERY,
   };
@@ -79,7 +79,7 @@ async function searchNaverPage(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-apollo-operation-name": "getRestaurants",
+      "x-apollo-operation-name": "getPlacesList",
       "User-Agent":
         "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
       Referer: "https://m.place.naver.com/",
@@ -95,10 +95,10 @@ async function searchNaverPage(
   if (data.errors?.length) return { items: [], total: 0 };
 
   // 광고(dbType !== 'drt') 제외
-  const items = (data.data?.restaurantList?.items ?? []).filter(
+  const items = (data.data?.businesses?.items ?? []).filter(
     (item) => item.dbType === "drt"
   );
-  const total = data.data?.restaurantList?.total ?? 0;
+  const total = data.data?.businesses?.total ?? 0;
   return { items, total };
 }
 
